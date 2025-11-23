@@ -1,0 +1,16 @@
+# .dockerignore dosyası içeriği
+
+# 1. Trivy cache ve geçici dosyalar (Disk sorununu çözmek için KRİTİK)
+.trivy-cache
+.trivy-temp
+
+# 2. Terraform state ve cache dosyaları (Büyük dosyalar, build context'i şişirir)
+# Eğer bu dosyalar projenin kök dizinine yakınsa ekleyin.
+**/.terraform/
+**/.terraform.lock.hcl
+**/*.tfstate
+**/*.tfstate.backup
+
+# 3. Zaten projenizde ignore ettiğiniz node_modules (Build süresini kısaltır)
+# Eğer Dockerfile içinde zaten "RUN npm install" yapıyorsanız, local node_modules'i göndermeye gerek yok.
+/node_modules

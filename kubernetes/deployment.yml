@@ -1,0 +1,28 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devops-05-pipeline-aws
+  labels:
+    app: devops-05-pipeline-aws
+    team: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: devops-05-pipeline-aws-1
+  template:
+    metadata:
+      labels:
+        app: devops-05-pipeline-aws-1
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+      - name: devops-05-pipeline-aws-1
+        image: sadikgok/devops-05-pipeline-aws-1:latest
+        imagePullPolicy: "Always"
+        resources:
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        ports:
+        - containerPort: 3000
