@@ -353,7 +353,7 @@ resource "aws_instance" "jenkins_master" {
   subnet_id              = aws_subnet.public_az1.id
   vpc_security_group_ids = [aws_security_group.jenkins_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.admin_instance_profile.name
-  user_data              = filebase64("./03_install.sh")
+  user_data              = file("./03_install.sh")
   tags                   = { Name = "Jenkins-Docker-Host" }
 }
 
@@ -365,7 +365,7 @@ resource "aws_instance" "argo_admin_master" {
   subnet_id              = aws_subnet.public_az2.id
   vpc_security_group_ids = [aws_security_group.argo_admin_sg.id]
   iam_instance_profile   = aws_iam_instance_profile.admin_instance_profile.name
-  user_data              = filebase64("./04_argo_install.sh")
+  user_data              = file("./04_argo_install.sh")
   tags                   = { Name = "ArgoCD-Kube-Admin-Host" }
 }
 
@@ -408,7 +408,7 @@ resource "aws_eks_node_group" "eks_worker_nodes" {
   node_group_name = "finops-t4g-medium-workers"
   subnet_ids      = [aws_subnet.private_az1.id, aws_subnet.private_az2.id]
   node_role_arn   = aws_iam_role.eks_node_role.arn
-
+  ami_type = "AL2023_ARM_64_STANDARD"
   capacity_type  = "ON_DEMAND"   # <-- Spot yerine On-Demand
   instance_types = [local.eks_worker_type]
   disk_size      = 20
@@ -434,7 +434,7 @@ resource "aws_eks_node_group" "eks_worker_nodes" {
 resource "aws_budgets_budget" "budget-ec2" {
   name              = "my-monthly-budget"
   budget_type       = "COST"
-  limit_amount      = "20"
+  limit_amount      = "50"
   limit_unit        = "USD"
   time_period_start = "2026-01-01_00:00" # Yıl 2026 olarak güncellendi ve format düzeltildi
   time_unit         = "MONTHLY"
@@ -449,15 +449,15 @@ resource "aws_budgets_budget" "budget-ec2" {
 }
 
 # 7.2. Monitoring Sunucusu için Elastic IP (Kalıcı IP)
-resource "aws_eip" "monitoring_eip" {
-  domain = "vpc"
-  tags   = { Name = "Monitoring-EIP" }
-}
+# resource "aws_eip" "monitoring_eip" {
+#   domain = "vpc"
+#   tags   = { Name = "Monitoring-EIP" }
+# }
 
-resource "aws_eip_association" "monitoring_eip_assoc" {
-  instance_id   = aws_instance.monitoring_server.id
-  allocation_id = aws_eip.monitoring_eip.id
-}
+# resource "aws_eip_association" "monitoring_eip_assoc" {
+#   instance_id   = aws_instance.monitoring_server.id
+#   allocation_id = aws_eip.monitoring_eip.id
+# }
 
 # -----------------------------------------------------------------------------
 # 8. ÇIKTILAR (OUTPUTS)
