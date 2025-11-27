@@ -23,7 +23,7 @@ pipeline {
         // Credentials
         //JENKINS_API_TOKEN = credentials('JENKINS_API_TOKEN')
         SONAR_CREDENTIALS = 'SonarTokenForJenkins'
-        
+        SONAR_NETWORK = 'sonarnet'
         // Trivy Reports
         TRIVY_FS_REPORT = "trivy-fs-scan.txt"
         TRIVY_JSON_REPORT = "trivy-report-${IMAGE_TAG}.json"
