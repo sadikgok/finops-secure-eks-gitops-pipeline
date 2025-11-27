@@ -79,30 +79,22 @@ pipeline {
         }
 
         stage("SonarQube Analysis") {
-            // Analizi yapmak için gerekli Docker imajını Agent olarak kullan
-            agent {
-                docker {
-                    image 'sonarsource/sonar-scanner-cli'
-                    // Host ağını kullanmak ve çalışma alanını bağlamak için argümanlar:
-                    // Host ağına erişim, 'sonar' servisine ulaşmayı sağlar.
-                    args "--network ${SONAR_NETWORK} -v ${WORKSPACE}:/usr/src" 
-                }
-            }
             steps {
                 script {
                     echo ' SonarQube kod analizi başlatılıyor...'
-                    // Jenkins Global Tool Configuration'da ayarlanmış SonarQube sunucusunu kullanır
                     withSonarQubeEnv(credentialsId: env.SONAR_CREDENTIALS) {
-                        // Artık 'sonar-scanner-cli' konteyneri içinde olduğumuz için
-                        // doğrudan 'sonar-scanner' komutunu çalıştırabiliriz.
+                        // Node.js projesi için sonar-scanner kullanımı
                         sh """
-                        /usr/bin/sonar-scanner \
-                            -Dsonar.projectKey=${APP_NAME} \
-                            -Dsonar.projectName=${APP_NAME} \
-                            -Dsonar.sources=. \
-                            -Dsonar.exclusions=node_modules/**,test/** \
-                            # SONAR_HOST_URL ve SONAR_LOGIN (SONAR_AUTH_TOKEN)
-                            # değerleri 'withSonarQubeEnv' tarafından otomatik olarak enjekte edilir.
+                            docker run --rm \
+                                --network sonarnet \
+                                -v \${WORKSPACE}:/usr/src \
+                                -e SONAR_HOST_URL=http://sonar:9000 \
+                                -e SONAR_LOGIN=\${SONAR_AUTH_TOKEN} \
+                                sonarsource/sonar-scanner-cli \
+                                -Dsonar.projectKey=${APP_NAME} \
+                                -Dsonar.projectName=${APP_NAME} \
+                                -Dsonar.sources=. \
+                                -Dsonar.exclusions=node_modules/**,test/**
                         """
                     }
                 }
