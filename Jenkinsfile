@@ -15,10 +15,10 @@ pipeline {
         IMAGE_TAG = "${RELEASE}.${BUILD_NUMBER}"
         
         // AWS/ECR Bilgileri (Terraform çıktısından alınacak)
-        AWS_REGION = "ap-south-1"
-        AWS_ACCOUNT_ID = credentials('AWS_ACCOUNT_ID') // Jenkins'te credential olarak ekleyin
-        ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-        ECR_REPO_NAME = "myapp-repo"
+        //AWS_REGION = "ap-south-1"
+        //AWS_ACCOUNT_ID = credentials('AWS_ACCOUNT_ID') // Jenkins'te credential olarak ekleyin
+        //ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        //ECR_REPO_NAME = "myapp-repo"
         
         // Credentials
         //JENKINS_API_TOKEN = credentials('JENKINS_API_TOKEN')
