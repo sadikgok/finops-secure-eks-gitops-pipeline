@@ -431,3 +431,233 @@ terraform destroy
 
 
 
+# DevOps Infrastructure - AWS EKS + Jenkins + ArgoCD
+
+> Basit, hızlı ve kullanıma hazır DevOps altyapısı
+
+## 🚀 Hızlı Başlangıç
+
+### 1. Terraform ile Altyapıyı Oluştur
+
+```bash
+# Terraform'u başlat
+terraform init
+
+# Altyapıyı planla
+terraform plan
+
+# Altyapıyı oluştur (10-15 dakika sürer)
+terraform apply -auto-approve
+```
+
+### 2. Jenkins'e Giriş
+
+```bash
+# Jenkins şifresini al
+ssh -i devops-auto-key.pem ec2-user@<JENKINS_IP>
+docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+```
+
+Jenkins'e tarayıcıdan giriş yap: `http://<JENKINS_IP>:8080`
+
+### 3. Pipeline Oluştur
+
+1. **New Item** → **Pipeline** seç
+2. Pipeline script'i artifact'taki **Jenkinsfile** içeriğini yapıştır
+3. Aşağıdaki değişkenleri güncelle:
+   - `YOUR_AWS_ACCOUNT_ID` → AWS Account ID'nizi yazın
+   - Repository URL'inizi güncelleyin
+
+### 4. SonarQube Yapılandır
+
+SonarQube: `http://<JENKINS_IP>:9000`
+- Kullanıcı: `admin`
+- Şifre: `admin` (ilk girişte değiştirin)
+
+Token oluştur:
+1. **My Account** → **Security** → **Generate Token**
+2. Jenkins'te **Manage Jenkins** → **Configure System** → **SonarQube servers**
+3. Token'ı ekle
+
+---
+
+## 🔍 Trivy Nasıl Çalışır?
+
+Jenkins Pipeline'ında Trivy **Docker image olarak** çalışır:
+
+```groovy
+stage('Trivy Security Scan') {
+    steps {
+        sh """
+            docker run --rm \
+                -v /var/run/docker.sock:/var/run/docker.sock \
+                aquasec/trivy:latest image \
+                --severity HIGH,CRITICAL \
+                myapp:${BUILD_NUMBER}
+        """
+    }
+}
+```
+
+**Neden bu yöntem?**
+- ✅ Jenkins container içine kurulum gerektirmez
+- ✅ Her zaman güncel Trivy versiyonu kullanılır
+- ✅ Basit ve bakımı kolay
+- ✅ Başkalarının da kolayca kullanabilmesi
+
+---
+
+## 📦 Kurulu Servisler
+
+| Servis | Port | Açıklama |
+|--------|------|----------|
+| Jenkins | 8080 | CI/CD Pipeline |
+| SonarQube | 9000 | Kod Kalitesi Analizi |
+| ArgoCD | 80 | GitOps Deployment |
+| Prometheus | 9090 | Metrik Toplama |
+| Grafana | 3000 | Monitoring Dashboard |
+
+---
+
+## 🛠️ Önemli Komutlar
+
+### Docker İşlemleri
+```bash
+# Jenkins loglarını görüntüle
+docker logs jenkins
+
+# Jenkins'i yeniden başlat
+docker restart jenkins
+
+# Tüm container'ları görüntüle
+docker ps -a
+```
+
+### EKS İşlemleri
+```bash
+# Kubectl'i yapılandır (ArgoCD host'undan)
+aws eks update-kubeconfig --name DevOps-EKS-Cluster --region ap-south-1
+
+# Pod'ları listele
+kubectl get pods -A
+
+# Node'ları listele
+kubectl get nodes
+```
+
+### Trivy Manuel Test
+```bash
+# Image scan
+docker run --rm \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    aquasec/trivy:latest image nginx:latest
+
+# Filesystem scan
+docker run --rm \
+    -v $(pwd):/scan \
+    aquasec/trivy:latest fs /scan
+```
+
+---
+
+## 🔐 Güvenlik Notları
+
+⚠️ **Production İçin Önemli:**
+
+1. **Security Group'ları daraltın:**
+   - `0.0.0.0/0` yerine kendi IP'nizi kullanın
+   - VPN veya Bastion Host kullanın
+
+2. **Şifreleri değiştirin:**
+   - SonarQube varsayılan şifresi: `admin/admin`
+   - PostgreSQL şifresi: `sonar_pass`
+
+3. **IAM yetkilerini daraltın:**
+   - Least privilege prensibini uygulayın
+
+4. **Secret Management:**
+   - AWS Secrets Manager kullanın
+   - Şifreleri kodda saklmayın
+
+---
+
+## 💰 Maliyet Optimizasyonu
+
+Bu altyapı **FinOps** odaklı tasarlandı:
+
+- **ARM64 (Graviton)** instance'lar → %20-40 maliyet tasarrufu
+- **t4g.large** yerine **t4g.medium** → Küçük workload'lar için yeterli
+- **Spot Instances** seçeneği → %70'e varan tasarruf
+- **AWS Budget** → Maliyet kontrolü
+
+**Tahmini Aylık Maliyet:** ~$100-150
+
+### Maliyeti Azaltmak İçin:
+```bash
+# Kullanılmadığında EKS node'ları 0'a indir
+aws eks update-nodegroup-config \
+    --cluster-name DevOps-EKS-Cluster \
+    --nodegroup-name finops-t4g-medium-workers \
+    --scaling-config minSize=0,maxSize=4,desiredSize=0
+```
+
+---
+
+## 🐛 Sorun Giderme
+
+### Jenkins başlamıyor
+```bash
+# Container'ı kontrol et
+docker ps -a | grep jenkins
+
+# Logları incele
+docker logs jenkins
+
+# Yeniden başlat
+docker restart jenkins
+```
+
+### Trivy bulunamıyor
+```bash
+# Image'ı manuel pull et
+docker pull aquasec/trivy:latest
+
+# Test et
+docker run --rm aquasec/trivy:latest --version
+```
+
+### ECR Push hatası
+```bash
+# IAM role'ü kontrol et
+aws sts get-caller-identity
+
+# ECR login
+aws ecr get-login-password --region ap-south-1 | \
+    docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com
+```
+
+---
+
+## 📚 Kaynaklar
+
+- [Jenkins Documentation](https://www.jenkins.io/doc/)
+- [Trivy Documentation](https://aquasecurity.github.io/trivy/)
+- [ArgoCD Documentation](https://argo-cd.readthedocs.io/)
+- [EKS Best Practices](https://aws.github.io/aws-eks-best-practices/)
+
+---
+
+## 🤝 Katkıda Bulunma
+
+Bu proje açık kaynaklıdır. Pull request'ler hoş geldiniz!
+
+---
+
+## 📄 Lisans
+
+MIT License
+
+---
+
+**Hazırlayan:** Sadık Gök  
+**İletişim:** sadik.gok@gmail.com

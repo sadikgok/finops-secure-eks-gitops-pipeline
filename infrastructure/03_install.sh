@@ -1,37 +1,39 @@
 #!/bin/bash
 # ============================================================
-# 03_install.sh - ARM64 EC2 Üzerinde Jenkins Docker + DevOps Araçları
+# 03_install.sh - Jenkins Docker + DevOps Araçları (ARM64)
+# Basit ve kullanıma hazır kurulum scripti
 # ============================================================
 
+set -e  # Hata durumunda scripti durdur
+
+echo "======================================"
+echo "Jenkins + DevOps Kurulumu Başlatılıyor"
+echo "======================================"
+
 # ----------------------------------
-# 0. Sistem Güncelleme
+# 1. Sistem Güncelleme
 # ----------------------------------
+echo "[1/7] Sistem güncelleniyor..."
 sudo dnf update -y
 
 # ----------------------------------
-# 1. Docker Kurulumu
+# 2. Docker Kurulumu
 # ----------------------------------
-echo "1. Docker Kurulumu Başlatılıyor..."
+echo "[2/7] Docker kuruluyor..."
 sudo dnf install docker -y
 sudo systemctl enable docker
 sudo systemctl start docker
-
-# Mevcut kullanıcıyı (ec2-user) docker grubuna ekle
 sudo usermod -aG docker ec2-user
 
-# Not: Jenkins kullanıcısının ID'si (1000) ile eşleşmesi için
-# /var/jenkins_home dizinini oluştur ve izinleri ayarla
+# Jenkins için volume hazırlığı
 sudo mkdir -p /var/jenkins_home
-# İzinleri EC2 user (geçici olarak) ve Jenkins user ID'sine verin
-sudo chown 1000:1000 /var/jenkins_home
+sudo chown -R 1000:1000 /var/jenkins_home
+sudo chmod -R 755 /var/jenkins_home
 
 # ----------------------------------
-# 2. Jenkins Docker Container Kurulumu (ARM64)
+# 3. Jenkins Container Başlatma
 # ----------------------------------
-echo "2. Jenkins Docker Container Başlatılıyor..."
-
-# --user root: Docker komutlarını çalıştırmak için Container'a root izni ver
-# -v /var/run/docker.sock:/var/run/docker.sock: Jenkins'in Host'taki Docker'ı kullanmasını sağlar (Docker-in-Docker)
+echo "[3/7] Jenkins container başlatılıyor..."
 sudo docker run -d \
     --name jenkins \
     --user root \
@@ -39,90 +41,94 @@ sudo docker run -d \
     -v /var/jenkins_home:/var/jenkins_home \
     -v /var/run/docker.sock:/var/run/docker.sock \
     --restart always \
-    jenkins/jenkins:lts-jdk17 # ARM64 mimarisi bu imajı otomatik çeker
+    jenkins/jenkins:lts-jdk17
 
-echo "Jenkins Docker container başlatıldı."
-
-# ----------------------------------
-# 3. Trivy Kurulumu (Host'a Kurulum: Jenkins Pipeline'da 'docker run' ile kullanmak için)
-# ----------------------------------
-echo "3. Trivy Kurulumu Başlatılıyor..."
-# Trivy'nin resmi deposunu ekleyerek kurmak, PATH sorunlarını çözer
-sudo rpm --import https://aquasecurity.github.io/trivy-repo/deb/public.key
-sudo tee /etc/yum.repos.d/trivy.repo <<EOF
-[trivy]
-name=Trivy repository
-baseurl=https://aquasecurity.github.io/trivy-repo/rpm/releases/\$releasever/\$basearch/
-gpgcheck=0
-enabled=1
-EOF
-sudo dnf install -y trivy
-
-# Trivy'yi /usr/local/bin'e kopyalamak, PATH sorunlarını çözer
-sudo cp /usr/bin/trivy /usr/local/bin/trivy 
-sudo chmod +x /usr/local/bin/trivy
-echo "Trivy kurulumu tamamlandı ve Host'a (/usr/bin ve /usr/local/bin) yerleştirildi."
+echo "✓ Jenkins başlatıldı (Port: 8080)"
 
 # ----------------------------------
-# 4. AWS CLI v2 Kurulumu (ARM64)
+# 4. Trivy Image'ini Hazırla
 # ----------------------------------
-# Bu araç Host'a kurulmalıdır, çünkü Jenkins Container'ı AWS ile etkileşim kurmak için IAM rolünü kullanacaktır.
-echo "4. AWS CLI Kurulumu Başlatılıyor..."
+echo "[4/7] Trivy docker image pull ediliyor..."
+sudo docker pull aquasec/trivy:latest
+echo "✓ Trivy hazır (Jenkins pipeline'dan kullanılabilir)"
+
+# ----------------------------------
+# 5. AWS CLI Kurulumu (Host)
+# ----------------------------------
+echo "[5/7] AWS CLI kuruluyor..."
 sudo dnf install unzip -y
-curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "awscliv2.zip"
-unzip awscliv2.zip
-# /usr/local/bin'e kurmak, PATH'te bulunma şansını artırır
+curl -s "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "awscliv2.zip"
+unzip -q awscliv2.zip
 sudo ./aws/install --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin
-rm awscliv2.zip
-rm -rf aws/
+rm -rf awscliv2.zip aws/
+echo "✓ AWS CLI kuruldu"
 
 # ----------------------------------
-# 5. Kubernetes Araçları (kubectl, eksctl, helm) - Host'a Kurulum
+# 6. SonarQube Hazırlık
 # ----------------------------------
-# Bu araçlar Jenkins Container'ında değil, ArgoCD host'unda kurulu olmalıdır. 
-# Eğer Jenkins'te K8S/EKS ile etkileşim kuracaksanız, bu adımları ArgoCD host'una taşıyabilirsiniz. 
-# Eğer Jenkins'te kullanılacaksa (Genellikle ArgoCD host'una taşınır), bu kurulumlar doğrudur.
+echo "[6/7] SonarQube için sistem yapılandırması..."
+# Kernel parametresi (kalıcı)
+echo "vm.max_map_count=262144" | sudo tee -a /etc/sysctl.conf
+sudo sysctl -p > /dev/null
 
-echo "5. Kubernetes Araçları Kuruluyor (ARM64)..."
+# Docker network oluştur
+sudo docker network create sonarnet 2>/dev/null || true
 
-# 5.1 kubectl (ARM64)
-K8S_VERSION=$(curl -s https://dl.k8s.io/release/stable.txt)
-curl -LO "https://dl.k8s.io/release/$K8S_VERSION/bin/linux/arm64/kubectl"
-sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-rm kubectl
-
-# 5.2 eksctl (ARM64)
-curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_arm64.tar.gz" | tar xz -C /tmp
-sudo mv /tmp/eksctl /usr/local/bin
-
-# 5.3 Helm
-curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-
-# ----------------------------------
-# 6. SonarQube ve PostgreSQL Container'ları
-# ----------------------------------
-echo "6. SonarQube ve PostgreSQL Konteynerları Başlatılıyor..."
-sudo docker network create sonarnet
-
-# PostgreSQL (SonarQube için)
-sudo sysctl -w vm.max_map_count=262144
-sudo docker run -d --network sonarnet \
+# PostgreSQL başlat
+echo "  → PostgreSQL başlatılıyor..."
+sudo docker run -d \
+    --network sonarnet \
     --name sonarqube-db \
     -e POSTGRES_USER=sonar \
     -e POSTGRES_PASSWORD=sonar_pass \
-    -e PGDATA=/var/lib/postgresql/data \
+    -e POSTGRES_DB=sonar \
+    -v sonar-db-data:/var/lib/postgresql/data \
+    --restart always \
     postgres:13-alpine
 
-# SonarQube
-echo "10 saniye bekleme, PostgreSQL'in hazır olması için..."
-sleep 10
-sudo docker run -d --network sonarnet \
+# PostgreSQL'in hazır olmasını bekle
+echo "  → PostgreSQL hazırlanıyor (15 saniye)..."
+sleep 15
+
+# SonarQube başlat
+echo "  → SonarQube başlatılıyor..."
+sudo docker run -d \
+    --network sonarnet \
     --name sonar \
-    --restart always \
     -p 9000:9000 \
-    -e SONARQUBE_JDBC_URL="jdbc:postgresql://sonarqube-db:5432/sonar" \
-    -e SONARQUBE_JDBC_USERNAME="sonar" \
-    -e SONARQUBE_JDBC_PASSWORD="sonar_pass" \
+    -e SONAR_JDBC_URL="jdbc:postgresql://sonarqube-db:5432/sonar" \
+    -e SONAR_JDBC_USERNAME="sonar" \
+    -e SONAR_JDBC_PASSWORD="sonar_pass" \
+    -v sonar-data:/opt/sonarqube/data \
+    -v sonar-logs:/opt/sonarqube/logs \
+    -v sonar-extensions:/opt/sonarqube/extensions \
+    --restart always \
     sonarqube:lts-community
 
-echo "Kurulum tamamlandı. Jenkins Docker container ve diğer DevOps araçları hazır."
+echo "✓ SonarQube başlatıldı (Port: 9000)"
+
+# ----------------------------------
+# 7. Kurulum Bilgileri
+# ----------------------------------
+echo ""
+echo "======================================"
+echo "✓ KURULUM TAMAMLANDI!"
+echo "======================================"
+echo ""
+echo "📦 Kurulu Servisler:"
+echo "  • Jenkins:   http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):8080"
+echo "  • SonarQube: http://$(curl -s http://169.254.169.254/latest/meta-data/public-ipv4):9000"
+echo ""
+echo "🔑 Jenkins İlk Şifre:"
+echo "  Aşağıdaki komutu çalıştırın:"
+echo "  docker exec jenkins cat /var/jenkins_home/secrets/initialAdminPassword"
+echo ""
+echo "🔐 SonarQube Varsayılan Giriş:"
+echo "  Kullanıcı: admin"
+echo "  Şifre: admin"
+echo ""
+echo "📝 Jenkins Pipeline'da Trivy Kullanımı:"
+echo "  docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \\"
+echo "    aquasec/trivy:latest image --severity HIGH,CRITICAL <image-name>"
+echo ""
+echo "======================================"
