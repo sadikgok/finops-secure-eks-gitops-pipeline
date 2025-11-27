@@ -54,10 +54,12 @@ pipeline {
             steps {
                 script {
                     echo 'Bağımlılıklar yükleniyor...'
-                    if (isUnix()) {
-                        sh 'npm install'
-                    } else {
-                        bat 'npm install'
+                    nodejs('node22'){
+                        if (isUnix()) {
+                            sh 'npm install'
+                        } else {
+                            bat 'npm install'
+                        }
                     }
                 }
             }
