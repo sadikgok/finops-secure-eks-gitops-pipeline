@@ -21,7 +21,7 @@ pipeline {
         ECR_REPO_NAME = "myapp-repo"
         
         // Credentials
-        JENKINS_API_TOKEN = credentials('JENKINS_API_TOKEN')
+        //JENKINS_API_TOKEN = credentials('JENKINS_API_TOKEN')
         SONAR_CREDENTIALS = 'SonarTokenForJenkins'
         
         // Trivy Reports
