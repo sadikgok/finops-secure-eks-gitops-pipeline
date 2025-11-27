@@ -44,7 +44,7 @@ pipeline {
 
         stage('Checkout from SCM') {
             steps {
-                git branch: 'master', 
+                git branch: 'main', 
                     url: 'https://github.com/sadikgok/finops-secure-eks-gitops-pipeline'
                 echo '✅ Kod deposu klonlandı'
             }
