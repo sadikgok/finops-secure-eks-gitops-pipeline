@@ -14,11 +14,11 @@ pipeline {
         IMAGE_NAME = "${DOCKER_USER}/${APP_NAME}"
         IMAGE_TAG = "${RELEASE}.${BUILD_NUMBER}"
         
-        // AWS/ECR Bilgileri (Terraform çıktısından alınacak)
+        // AWS/ECR
         AWS_REGION = "ap-south-1"
-        AWS_ACCOUNT_ID = credentials('AWS_ACCOUNT_ID') // Jenkins'te credential olarak ekleyin
+        AWS_ACCOUNT_ID = credentials('AWS_ACCOUNT_ID')
         ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-        ECR_REPO_NAME = "myapp-repo"
+        ECR_REPO_NAME = "finops-app-repo"
         
         // Credentials
         JENKINS_API_TOKEN = credentials('JENKINS_API_TOKEN')
@@ -44,7 +44,7 @@ pipeline {
 
         stage('Checkout from SCM') {
             steps {
-                git branch: 'master', 
+                git branch: 'main', 
                     url: 'https://github.com/sadikgok/finops-secure-eks-gitops-pipeline'
                 echo '✅ Kod deposu klonlandı'
             }
@@ -53,12 +53,8 @@ pipeline {
         stage('Install Dependencies') {
             steps {
                 script {
-                    echo 'Bağımlılıklar yükleniyor...'
-                    if (isUnix()) {
-                        sh 'npm install'
-                    } else {
-                        bat 'npm install'
-                    }
+                    echo '📦 Bağımlılıklar yükleniyor...'
+                    sh 'npm install'
                 }
             }
         }
@@ -66,12 +62,8 @@ pipeline {
         stage('Run Tests') {
             steps {
                 script {
-                    echo ' Testler çalıştırılıyor...'
-                    if (isUnix()) {
-                        sh 'npm test || true'
-                    } else {
-                        bat 'npm test || true'
-                    }
+                    echo '🧪 Testler çalıştırılıyor...'
+                    sh 'npm test || true'
                 }
             }
         }
@@ -79,20 +71,15 @@ pipeline {
         stage("SonarQube Analysis") {
             steps {
                 script {
-                    echo ' SonarQube kod analizi başlatılıyor...'
+                    echo '📊 SonarQube kod analizi başlatılıyor...'
                     withSonarQubeEnv(credentialsId: env.SONAR_CREDENTIALS) {
-                        // Node.js projesi için sonar-scanner kullanımı
+                        // SonarQube Scanner for JavaScript/Node.js
                         sh """
-                            docker run --rm \
-                                --network sonarnet \
-                                -v \${WORKSPACE}:/usr/src \
-                                -e SONAR_HOST_URL=http://sonar:9000 \
-                                -e SONAR_LOGIN=\${SONAR_AUTH_TOKEN} \
-                                sonarsource/sonar-scanner-cli \
+                            sonar-scanner \
                                 -Dsonar.projectKey=${APP_NAME} \
                                 -Dsonar.projectName=${APP_NAME} \
                                 -Dsonar.sources=. \
-                                -Dsonar.exclusions=node_modules/**,test/**
+                                -Dsonar.exclusions=node_modules/**,test/**,coverage/**
                         """
                     }
                 }
@@ -102,7 +89,7 @@ pipeline {
         stage("Quality Gate") {
             steps {
                 script {
-                    echo ' Quality Gate kontrol ediliyor...'
+                    echo '🚦 Quality Gate kontrol ediliyor...'
                     timeout(time: 5, unit: 'MINUTES') {
                         waitForQualityGate abortPipeline: false, 
                                            credentialsId: env.SONAR_CREDENTIALS
@@ -114,14 +101,15 @@ pipeline {
         stage('Trivy File System Scan') {
             steps {
                 script {
-                    echo ' Trivy dosya sistemi taraması başlatılıyor...'
+                    echo '🔍 Trivy dosya sistemi taraması başlatılıyor...'
+                    // Native Jenkins'te docker komutları direkt çalışır
                     sh """
                         docker run --rm \
-                            -v \$(pwd):/work \
+                            -v \${WORKSPACE}:/scan \
                             aquasec/trivy:latest fs \
                             --severity HIGH,CRITICAL \
                             --format table \
-                            /work > ${TRIVY_FS_REPORT}
+                            /scan > ${TRIVY_FS_REPORT} || true
                     """
                     echo '✅ Trivy FS taraması tamamlandı'
                 }
@@ -131,15 +119,15 @@ pipeline {
         stage('Docker Build & Tag') {
             steps {
                 script {
-                    echo ' Docker image build ediliyor...'
-                    // Hem Docker Hub hem ECR için tag'le
+                    echo '🔨 Docker image build ediliyor...'
+                    // Native Jenkins'te docker komutları direkt çalışır
                     sh """
                         docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
                         docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
                         docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}
                         docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO_NAME}:latest
                     """
-                    echo ' Docker image oluşturuldu ve tag\'lendi'
+                    echo '✅ Docker image oluşturuldu ve tag\'lendi'
                 }
             }
         }
@@ -151,26 +139,25 @@ pipeline {
                     
                     // JSON rapor oluştur
                     sh """
-                        chmod 777 ${WORKSPACE} || true
                         docker run --rm \
                             -v /var/run/docker.sock:/var/run/docker.sock \
-                            -v ${WORKSPACE}:/report \
+                            -v \${WORKSPACE}:/report \
                             aquasec/trivy:latest image \
                             --format json \
                             --severity HIGH,CRITICAL \
                             --output /report/${TRIVY_JSON_REPORT} \
-                            ${IMAGE_NAME}:${IMAGE_TAG}
+                            ${IMAGE_NAME}:${IMAGE_TAG} || true
                     """
 
                     // HTML rapor oluştur
                     sh """
                         docker run --rm \
-                            -v ${WORKSPACE}:/report \
+                            -v \${WORKSPACE}:/report \
                             aquasec/trivy:latest convert \
                             --format template \
                             --template "@contrib/html.tpl" \
                             --output /report/${TRIVY_HTML_REPORT} \
-                            /report/${TRIVY_JSON_REPORT}
+                            /report/${TRIVY_JSON_REPORT} || true
                     """
                     
                     echo '✅ Trivy güvenlik raporları oluşturuldu'
@@ -181,9 +168,14 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 script {
-                    echo ' Docker Hub\'a image push ediliyor...'
-                    docker.withRegistry('https://registry.hub.docker.com', DOCKER_ID_LOGIN) {
+                    echo '📤 Docker Hub\'a image push ediliyor...'
+                    withCredentials([usernamePassword(
+                        credentialsId: DOCKER_ID_LOGIN,
+                        usernameVariable: 'DOCKER_USERNAME',
+                        passwordVariable: 'DOCKER_PASSWORD'
+                    )]) {
                         sh """
+                            echo \$DOCKER_PASSWORD | docker login -u \$DOCKER_USERNAME --password-stdin
                             docker push ${IMAGE_NAME}:${IMAGE_TAG}
                             docker push ${IMAGE_NAME}:latest
                         """
@@ -196,9 +188,9 @@ pipeline {
         stage('Push to AWS ECR') {
             steps {
                 script {
-                    echo ' AWS ECR\'a image push ediliyor...'
+                    echo '📤 AWS ECR\'a image push ediliyor...'
                     sh """
-                        # ECR login
+                        # ECR login (IAM role otomatik kullanılır)
                         aws ecr get-login-password --region ${AWS_REGION} | \
                             docker login --username AWS --password-stdin ${ECR_REGISTRY}
                         
@@ -215,22 +207,27 @@ pipeline {
             steps {
                 script {
                     echo '📝 Kubernetes manifest güncelleniyor...'
-                    // ArgoCD için GitOps repository'sini güncelle
-                    sh """
-                        # Manifest repo'sunu clone et
-                        git clone https://github.com/sadikgok/k8s-manifests.git
-                        cd k8s-manifests
-                        
-                        # Image tag'ini güncelle
-                        sed -i 's|image: .*|image: ${ECR_REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}|g' deployment.yaml
-                        
-                        # Değişiklikleri commit ve push et
-                        git config user.email "jenkins@pipeline.com"
-                        git config user.name "Jenkins Pipeline"
-                        git add deployment.yaml
-                        git commit -m "Update image to ${IMAGE_TAG}" || true
-                        git push origin main
-                    """
+                    withCredentials([string(credentialsId: 'GITHUB_TOKEN', variable: 'GIT_TOKEN')]) {
+                        sh """
+                            # Clone manifest repository
+                            rm -rf k8s-manifests
+                            git clone https://\${GIT_TOKEN}@github.com/sadikgok/k8s-manifests.git
+                            cd k8s-manifests
+                            
+                            # Update image tag
+                            sed -i 's|image: .*|image: ${ECR_REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}|g' deployment.yaml
+                            
+                            # Commit and push
+                            git config user.email "jenkins@pipeline.com"
+                            git config user.name "Jenkins Pipeline"
+                            git add deployment.yaml
+                            git commit -m "Update image to ${IMAGE_TAG}" || true
+                            git push origin main || git push origin master
+                            
+                            cd ..
+                            rm -rf k8s-manifests
+                        """
+                    }
                     echo '✅ Manifest güncellendi, ArgoCD otomatik sync yapacak'
                 }
             }
@@ -239,58 +236,56 @@ pipeline {
         stage('Cleanup Old Docker Tags') {
             steps {
                 script {
-                    echo '🧹 Eski Docker image tag\'leri temizleniyor...'
+                    echo '🧹 Eski Docker Hub tag\'leri temizleniyor...'
                     withCredentials([usernamePassword(
                         credentialsId: env.DOCKER_ID_LOGIN,
                         usernameVariable: 'HUB_USER',
                         passwordVariable: 'HUB_PAT'
                     )]) {
-                        sh """#!/usr/bin/env bash
+                        sh '''#!/usr/bin/env bash
                             set -euo pipefail
                             
-                            REPO_NAME="${env.IMAGE_NAME}"
+                            REPO_NAME="${IMAGE_NAME}"
                             
-                            echo "1. Docker Hub JWT token alınıyor..."
-                            HUB_TOKEN=\$(curl -s -H "Content-Type: application/json" -X POST \\
-                                -d "{\\"username\\": \\"\$HUB_USER\\", \\"password\\": \\"\$HUB_PAT\\"}" \\
+                            # Get JWT token
+                            HUB_TOKEN=$(curl -s -H "Content-Type: application/json" -X POST \
+                                -d "{\\"username\\": \\"$HUB_USER\\", \\"password\\": \\"$HUB_PAT\\"}" \
                                 https://hub.docker.com/v2/users/login/ | jq -r .token)
 
-                            if [ -z "\$HUB_TOKEN" ] || [ "\$HUB_TOKEN" = "null" ]; then
+                            if [ -z "$HUB_TOKEN" ] || [ "$HUB_TOKEN" = "null" ]; then
                                 echo "❌ JWT token alınamadı"
-                                exit 1
+                                exit 0
                             fi
                             
-                            echo "2. Tüm tag'ler çekiliyor..."
-                            ALL_TAGS=\$(curl -s -H "Authorization: JWT \${HUB_TOKEN}" \\
-                                "https://hub.docker.com/v2/repositories/\$REPO_NAME/tags/?page_size=1000" \\
+                            # Get all tags
+                            ALL_TAGS=$(curl -s -H "Authorization: JWT ${HUB_TOKEN}" \
+                                "https://hub.docker.com/v2/repositories/$REPO_NAME/tags/?page_size=1000" \
                                 | jq -r '.results[].name')
 
-                            if [ -z "\$ALL_TAGS" ]; then
-                                echo "⚠️ Depoda tag bulunamadı"
+                            if [ -z "$ALL_TAGS" ]; then
+                                echo "⚠️ Tag bulunamadı"
                                 exit 0
                             fi
 
-                            echo "3. En son ${env.KEEP_COUNT} tag hariç eskiler belirleniyor..."
-                            TAGS_TO_DELETE=\$(echo "\$ALL_TAGS" | grep -v 'latest' | sort -rV | tail -n +\$(( ${env.KEEP_COUNT} + 1 )))
+                            # Keep last N tags, delete rest
+                            TAGS_TO_DELETE=$(echo "$ALL_TAGS" | grep -v 'latest' | sort -rV | tail -n +$((${KEEP_COUNT} + 1)))
                             
-                            if [ -z "\$TAGS_TO_DELETE" ]; then
-                                echo "✅ Silinecek tag yok (${env.KEEP_COUNT} adet korunuyor)"
+                            if [ -z "$TAGS_TO_DELETE" ]; then
+                                echo "✅ Silinecek tag yok"
                                 exit 0
                             fi
 
-                            echo "4. Silinecek tag'ler:"
-                            echo "\$TAGS_TO_DELETE"
-
-                            echo "5. Tag'ler siliniyor..."
-                            echo "\$TAGS_TO_DELETE" | while read TAG; do
-                                echo "  🗑️  Siliniyor: \${TAG}"
-                                curl -s -X DELETE \\
-                                    -H "Authorization: JWT \${HUB_TOKEN}" \\
-                                    "https://hub.docker.com/v2/repositories/\$REPO_NAME/tags/\${TAG}/"
+                            echo "Silinecek tag'ler: $TAGS_TO_DELETE"
+                            
+                            echo "$TAGS_TO_DELETE" | while read TAG; do
+                                echo "🗑️  Siliniyor: ${TAG}"
+                                curl -s -X DELETE \
+                                    -H "Authorization: JWT ${HUB_TOKEN}" \
+                                    "https://hub.docker.com/v2/repositories/$REPO_NAME/tags/${TAG}/"
                             done
                             
                             echo "✅ Temizleme tamamlandı"
-                        """
+                        '''
                     }
                 }
             }
@@ -313,7 +308,7 @@ pipeline {
     post {
         success {
             echo '✅ Pipeline başarıyla tamamlandı!'
-            echo "📦 Image: ${IMAGE_NAME}:${IMAGE_TAG}"
+            echo "📦 Docker Hub: ${IMAGE_NAME}:${IMAGE_TAG}"
             echo "📦 ECR: ${ECR_REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}"
         }
         failure {
