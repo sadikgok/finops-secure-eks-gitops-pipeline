@@ -4,7 +4,6 @@ pipeline {
     tools {
         jdk 'Java17'
         nodejs 'node22'
-        sonar 'sonar'
     }
 
     environment {
