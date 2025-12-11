@@ -4,6 +4,7 @@ pipeline {
     tools {
         jdk 'Java17'
         nodejs 'node22'
+        SONAR_ROOT = '/var/lib/jenkins/tools/hudson.plugins.sonar.SonarRunnerInstallation/sonar-scanner'
         'hudson.plugins.sonar.SonarRunnerInstallation' 'sonar-scanner'
     }
 
@@ -69,7 +70,7 @@ pipeline {
             }
         }
 
-        stage('SonarScanner Diagnostics') {
+        /*stage('SonarScanner Diagnostics') {
             steps {
                 script {
                     echo '🔍 SonarScanner kurulum yolu kontrol ediliyor...'
@@ -83,7 +84,7 @@ pipeline {
                     sh 'echo $PATH' 
                 }
             }
-        }
+        }*/
 
         stage("SonarQube Analysis") {
             steps {
@@ -92,6 +93,11 @@ pipeline {
                     withSonarQubeEnv(credentialsId: env.SONAR_CREDENTIALS) {
                         // SonarQube Scanner for JavaScript/Node.js
                          sh """
+                         # Buraya PATH'i manuel olarak genişletiyoruz:
+                        SONAR_SCANNER_DIR='/var/lib/jenkins/tools/hudson.plugins.sonar.SonarRunnerInstallation/sonar-scanner/bin'
+                        export PATH=\$PATH:\$SONAR_SCANNER_DIR
+                        
+                        echo "Güncel PATH: \$PATH"
                             sonar-scanner \
                                 -Dsonar.projectKey=${APP_NAME} \
                                 -Dsonar.projectName=${APP_NAME} \
