@@ -4,6 +4,7 @@ pipeline {
     tools {
         jdk 'Java17'
         nodejs 'node22'
+        sonar "sonar-scanner"
     }
 
     environment {
@@ -75,7 +76,7 @@ pipeline {
                     withSonarQubeEnv(credentialsId: env.SONAR_CREDENTIALS) {
                         // SonarQube Scanner for JavaScript/Node.js
                         sh """
-                            sonar \
+                            sonar-scanner \
                                 -Dsonar.projectKey=${APP_NAME} \
                                 -Dsonar.projectName=${APP_NAME} \
                                 -Dsonar.sources=. \
