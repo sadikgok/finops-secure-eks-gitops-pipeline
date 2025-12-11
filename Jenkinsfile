@@ -69,6 +69,22 @@ pipeline {
             }
         }
 
+        stage('SonarScanner Diagnostics') {
+            steps {
+                script {
+                    echo '🔍 SonarScanner kurulum yolu kontrol ediliyor...'
+                    // SonarScanner'ın Path'te olup olmadığını kontrol edin
+                    sh 'which sonar-scanner || echo "sonar-scanner Path\'te bulunamadı."'
+                    
+                    // Jenkins'in HOME dizinini kontrol edin (Araçlar genellikle buraya kurulur)
+                    sh 'ls -l ${JENKINS_HOME}/tools/hudson.plugins.sonar.SonarRunnerInstallation/ || echo "Araçlar dizini boş veya bulunamadı."'
+                    
+                    // İşin çalıştığı Agent'taki tüm PATH değişkenini görüntüleyin
+                    sh 'echo $PATH' 
+                }
+            }
+        }
+
         stage("SonarQube Analysis") {
             steps {
                 script {
