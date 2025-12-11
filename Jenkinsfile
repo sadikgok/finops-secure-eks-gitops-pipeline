@@ -143,12 +143,27 @@ pipeline {
                 script {
                     echo '🔨 Docker image build ediliyor...'
                     // Native Jenkins'te docker komutları direkt çalışır
-                    sh """
+                    /*sh """
                         docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
                         docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
                         docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}
                         docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO_NAME}:latest
-                    """
+                    """*/
+                    
+                    // ECR_ACCOUNT_ID'yi güvenli bir şekilde çekiyoruz
+                    withCredentials([
+                        // Bu, 'AWS_ACCOUNT_ID' isimli Jenkins credential'ını çeker 
+                        // ve değerini 'AWS_ACCOUNT_ID_SECRET' adlı bir Groovy değişkenine atar.
+                        string(credentialsId: 'AWS_ACCOUNT_ID', variable: 'AWS_ACCOUNT_ID_SECRET')
+                    ]) {
+                        // ECR_REGISTRY'yi burada, yani Groovy'nin izin verdiği kapsamda tanımlıyoruz.
+                        def ECR_REGISTRY = "${AWS_ACCOUNT_ID_SECRET}.dkr.ecr.${env.AWS_REGION}.amazonaws.com"
+                        
+                        echo "🐳 Docker imajı oluşturuluyor ve ${ECR_REGISTRY}/${env.ECR_REPO_NAME}:${env.BUILD_NUMBER} olarak etiketleniyor..."
+                        
+                        // Artık ECR_REGISTRY'yi kullanabilirsiniz
+                        sh "docker build -t ${ECR_REGISTRY}/${env.ECR_REPO_NAME}:${env.BUILD_NUMBER} ."
+                        sh "docker tag ${ECR_REGISTRY}/${env.ECR_REPO_NAME}:${env.BUILD_NUMBER} ${ECR_REGISTRY}/${env.ECR_REPO_NAME}:latest"
                     echo '✅ Docker image oluşturuldu ve tag\'lendi'
                 }
             }
