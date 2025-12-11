@@ -75,13 +75,13 @@ pipeline {
                     echo '📊 SonarQube kod analizi başlatılıyor...'
                     withSonarQubeEnv(credentialsId: env.SONAR_CREDENTIALS) {
                         // SonarQube Scanner for JavaScript/Node.js
-                        sh """
-                            sonar-scanner \\
-                                -Dsonar.projectKey=${APP_NAME} \\
-                                -Dsonar.projectName=${APP_NAME} \\
-                                -Dsonar.sources=. \\
-                                -Dsonar.exclusions=node_modules/**,test/**,coverage/**
-                        """
+                         sh """
+                            sonar-scanner \
+                                -Dsonar.projectKey=${APP_NAME} \
+                                -Dsonar.projectName=${APP_NAME} \
+                                -Dsonar.sources=. \
+                                -Dsonar.exclusions=node_modules/**,test/**,coverage/**
+                        """
                     }
                 }
             }
