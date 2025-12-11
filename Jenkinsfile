@@ -4,6 +4,7 @@ pipeline {
     tools {
         jdk 'Java17'
         nodejs 'node22'
+        sonarQubeScanner 'sonar-scanner'
     }
 
     environment {
