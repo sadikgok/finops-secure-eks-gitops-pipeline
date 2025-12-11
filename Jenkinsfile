@@ -164,7 +164,7 @@ pipeline {
                 }
             }
         }
-
+/*
         stage('Push to Docker Hub') {
             steps {
                 script {
@@ -303,8 +303,10 @@ pipeline {
                 }
             }
         }
+        */
     }
     
+    /*
     post {
         success {
             echo '✅ Pipeline başarıyla tamamlandı!'
@@ -321,4 +323,5 @@ pipeline {
                             allowEmptyArchive: true
         }
     }
+    */
 }
