@@ -4,7 +4,6 @@ pipeline {
     tools {
         jdk 'Java17'
         nodejs 'node22'
-        SONAR_ROOT = '/var/lib/jenkins/tools/hudson.plugins.sonar.SonarRunnerInstallation/sonar-scanner'
         'hudson.plugins.sonar.SonarRunnerInstallation' 'sonar-scanner'
     }
 
