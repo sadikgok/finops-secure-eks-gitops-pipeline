@@ -164,7 +164,8 @@ pipeline {
                         // Artık ECR_REGISTRY'yi kullanabilirsiniz
                         sh "docker build -t ${ECR_REGISTRY}/${env.ECR_REPO_NAME}:${env.BUILD_NUMBER} ."
                         sh "docker tag ${ECR_REGISTRY}/${env.ECR_REPO_NAME}:${env.BUILD_NUMBER} ${ECR_REGISTRY}/${env.ECR_REPO_NAME}:latest"
-                    echo '✅ Docker image oluşturuldu ve tag\'lendi'
+                        echo '✅ Docker image oluşturuldu ve tag\'lendi'
+                    }
                 }
             }
         }
