@@ -4,6 +4,7 @@ pipeline {
     tools {
         jdk 'Java17'
         nodejs 'node22'
+        'hudson.plugins.sonar.SonarRunnerInstallation' 'sonar-scanner'
     }
 
     environment {
@@ -15,13 +16,13 @@ pipeline {
         IMAGE_TAG = "${RELEASE}.${BUILD_NUMBER}"
         
         // AWS/ECR
-        AWS_REGION = "ap-south-1"
+        /*AWS_REGION = "ap-south-1"
         AWS_ACCOUNT_ID = credentials('AWS_ACCOUNT_ID')
         ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-        ECR_REPO_NAME = "finops-app-repo"
+        ECR_REPO_NAME = "finops-app-repo"*/
         
         // Credentials
-        JENKINS_API_TOKEN = credentials('JENKINS_API_TOKEN')
+        //JENKINS_API_TOKEN = credentials('JENKINS_API_TOKEN')
         SONAR_CREDENTIALS = 'SonarTokenForJenkins'
         
         // Trivy Reports
@@ -68,13 +69,34 @@ pipeline {
             }
         }
 
+        /*stage('SonarScanner Diagnostics') {
+            steps {
+                script {
+                    echo '🔍 SonarScanner kurulum yolu kontrol ediliyor...'
+                    // SonarScanner'ın Path'te olup olmadığını kontrol edin
+                    sh 'which sonar-scanner || echo "sonar-scanner Path\'te bulunamadı."'
+                    
+                    // Jenkins'in HOME dizinini kontrol edin (Araçlar genellikle buraya kurulur)
+                    sh 'ls -l ${JENKINS_HOME}/tools/hudson.plugins.sonar.SonarRunnerInstallation/ || echo "Araçlar dizini boş veya bulunamadı."'
+                    
+                    // İşin çalıştığı Agent'taki tüm PATH değişkenini görüntüleyin
+                    sh 'echo $PATH' 
+                }
+            }
+        }*/
+
         stage("SonarQube Analysis") {
             steps {
                 script {
                     echo '📊 SonarQube kod analizi başlatılıyor...'
                     withSonarQubeEnv(credentialsId: env.SONAR_CREDENTIALS) {
                         // SonarQube Scanner for JavaScript/Node.js
-                        sh """
+                         sh """
+                         # Buraya PATH'i manuel olarak genişletiyoruz:
+                        SONAR_SCANNER_DIR='/var/lib/jenkins/tools/hudson.plugins.sonar.SonarRunnerInstallation/sonar-scanner/bin'
+                        export PATH=\$PATH:\$SONAR_SCANNER_DIR
+                        
+                        echo "Güncel PATH: \$PATH"
                             sonar-scanner \
                                 -Dsonar.projectKey=${APP_NAME} \
                                 -Dsonar.projectName=${APP_NAME} \
@@ -115,7 +137,20 @@ pipeline {
                 }
             }
         }
-        
+
+        stage('Docker Build & Push to DockerHub') {
+            steps {
+                script {
+                    docker.withRegistry('', DOCKER_ID_LOGIN) {
+                        def docker_image = docker.build "${IMAGE_NAME}"
+                        docker_image.push("${IMAGE_TAG}")
+                        docker_image.push("latest")
+                    }
+                }
+            }
+        }
+
+        /*
         stage('Docker Build & Tag') {
             steps {
                 script {
@@ -127,10 +162,26 @@ pipeline {
                         docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}
                         docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO_NAME}:latest
                     """
-                    echo '✅ Docker image oluşturuldu ve tag\'lendi'
+                    
+                    // ECR_ACCOUNT_ID'yi güvenli bir şekilde çekiyoruz
+                    withCredentials([
+                        // Bu, 'AWS_ACCOUNT_ID' isimli Jenkins credential'ını çeker 
+                        // ve değerini 'AWS_ACCOUNT_ID_SECRET' adlı bir Groovy değişkenine atar.
+                        string(credentialsId: 'AWS_ACCOUNT_ID', variable: 'AWS_ACCOUNT_ID_SECRET')
+                    ]) {
+                        // ECR_REGISTRY'yi burada, yani Groovy'nin izin verdiği kapsamda tanımlıyoruz.
+                        def ECR_REGISTRY = "${AWS_ACCOUNT_ID_SECRET}.dkr.ecr.${env.AWS_REGION}.amazonaws.com"
+                        
+                        echo "🐳 Docker imajı oluşturuluyor ve ${ECR_REGISTRY}/${env.ECR_REPO_NAME}:${env.BUILD_NUMBER} olarak etiketleniyor..."
+                        
+                        // Artık ECR_REGISTRY'yi kullanabilirsiniz
+                        sh "docker build -t ${ECR_REGISTRY}/${env.ECR_REPO_NAME}:${env.BUILD_NUMBER} ."
+                        sh "docker tag ${ECR_REGISTRY}/${env.ECR_REPO_NAME}:${env.BUILD_NUMBER} ${ECR_REGISTRY}/${env.ECR_REPO_NAME}:latest"
+                        echo '✅ Docker image oluşturuldu ve tag\'lendi'
+                    }
                 }
             }
-        }
+        }*/
 
         stage("Trivy Image Scan") {
             steps {
@@ -164,7 +215,7 @@ pipeline {
                 }
             }
         }
-/*
+
         stage('Push to Docker Hub') {
             steps {
                 script {
@@ -184,7 +235,7 @@ pipeline {
                 }
             }
         }
-
+/*
         stage('Push to AWS ECR') {
             steps {
                 script {
@@ -202,7 +253,7 @@ pipeline {
                 }
             }
         }
-
+*/
         stage('Update K8s Manifest') {
             steps {
                 script {
@@ -232,7 +283,7 @@ pipeline {
                 }
             }
         }
-
+/*
         stage('Cleanup Old Docker Tags') {
             steps {
                 script {

@@ -1,5 +1,3 @@
-# main.tf - ARM64 DevOps Infrastructure (NAT-less)
-
 terraform {
   required_providers {
     aws   = { source = "hashicorp/aws", version = "~> 5.0" }
@@ -8,22 +6,51 @@ terraform {
   }
 }
 
-provider "aws" {
-  region = "ap-south-1"
+# ----------------------------
+# VARIABLES (same file)
+# ----------------------------
+variable "region" {
+  type    = string
+  default = "ap-south-1"
 }
 
-locals {
-  cluster_name = "DevOps-EKS-Cluster"
-  common_tags = {
-    Project     = "FinOps-DevOps"
-    Environment = "Production"
-    ManagedBy   = "Terraform"
+variable "cluster_name" {
+  type    = string
+  default = "DevOps-EKS-Cluster"
+}
+
+# ONLY your IPs / office/VPN
+variable "allowed_cidrs" {
+  type        = list(string)
+  description = "CIDRs allowed to access admin UIs and EKS public endpoint"
+  default     = ["YOUR_PUBLIC_IP/32"]
+}
+
+variable "budget_email" {
+  type    = string
+  default = "sadik.gok@gmail.com"
+}
+
+provider "aws" {
+  region = var.region
+
+  default_tags {
+    tags = {
+      Project     = "FinOps-DevOps"
+      Environment = "Production"
+      ManagedBy   = "Terraform"
+    }
   }
 }
 
-# -----------------------------------------------------------------------------
-# DATA SOURCES
-# -----------------------------------------------------------------------------
+locals {
+  common_tags = {}
+  name_prefix = var.cluster_name
+}
+
+# ----------------------------
+# DATA
+# ----------------------------
 data "aws_availability_zones" "available" {
   state = "available"
 }
@@ -32,14 +59,14 @@ data "aws_ami" "amazon_linux_2023_arm" {
   most_recent = true
   owners      = ["amazon"]
   filter {
-    name  = "name"
+    name   = "name"
     values = ["al2023-ami-*-kernel-6.1-arm64"]
   }
 }
 
-# -----------------------------------------------------------------------------
-# SSH KEY PAIR
-# -----------------------------------------------------------------------------
+# ----------------------------
+# SSH KEY (optional; keep for now)
+# ----------------------------
 resource "tls_private_key" "devops_key" {
   algorithm = "RSA"
   rsa_bits  = 4096
@@ -56,69 +83,64 @@ resource "local_file" "devops_key_file" {
   file_permission = "0400"
 }
 
-# -----------------------------------------------------------------------------
-# VPC & NETWORKING
-# -----------------------------------------------------------------------------
+# ----------------------------
+# VPC
+# ----------------------------
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
   enable_dns_support   = true
   enable_dns_hostnames = true
-  tags = merge(local.common_tags, {
-    Name                                    = "${local.cluster_name}-VPC"
-    "kubernetes.io/cluster/${local.cluster_name}" = "owned"
-  })
+
+  tags = {
+    Name                                        = "${local.name_prefix}-VPC"
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
+  }
 }
 
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
-  tags   = merge(local.common_tags, { Name = "${local.cluster_name}-IGW" })
+  tags   = { Name = "${local.name_prefix}-IGW" }
 }
 
-# Public Subnets (Internet erişimi olan alt ağlar)
 resource "aws_subnet" "public" {
   count                   = 2
   vpc_id                  = aws_vpc.main.id
   cidr_block              = "10.0.${count.index + 1}.0/24"
   availability_zone       = data.aws_availability_zones.available.names[count.index]
   map_public_ip_on_launch = true
-  tags = merge(local.common_tags, {
-    Name                                    = "${local.cluster_name}-Public-${count.index + 1}"
-    "kubernetes.io/cluster/${local.cluster_name}" = "owned"
-    "kubernetes.io/role/elb"                  = "1"
-  })
+
+  tags = {
+    Name                                        = "${local.name_prefix}-Public-${count.index + 1}"
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
+    "kubernetes.io/role/elb"                    = "1"
+  }
 }
 
-# Private Subnets (Internet erişimi OLMAYAN alt ağlar)
 resource "aws_subnet" "private" {
   count             = 2
   vpc_id            = aws_vpc.main.id
   cidr_block        = "10.0.${count.index + 10}.0/24"
   availability_zone = data.aws_availability_zones.available.names[count.index]
-  tags = merge(local.common_tags, {
-    Name                                    = "${local.cluster_name}-Private-${count.index + 1}"
-    "kubernetes.io/cluster/${local.cluster_name}" = "owned"
-    "kubernetes.io/role/internal-elb"         = "1"
-  })
+
+  tags = {
+    Name                                        = "${local.name_prefix}-Private-${count.index + 1}"
+    "kubernetes.io/cluster/${var.cluster_name}" = "owned"
+    "kubernetes.io/role/internal-elb"           = "1"
+  }
 }
 
-# EIP ve NAT Gateway KAYNAKLARI BURADAN KALDIRILDI!
-
-# Route Tables
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
   route {
     cidr_block = "0.0.0.0/0"
     gateway_id = aws_internet_gateway.main.id
   }
-  tags = merge(local.common_tags, { Name = "${local.cluster_name}-Public-RT" })
+  tags = { Name = "${local.name_prefix}-Public-RT" }
 }
 
-# Özel alt ağ rota tablosu güncellendi (0.0.0.0/0 rotası kaldırıldı)
 resource "aws_route_table" "private" {
   vpc_id = aws_vpc.main.id
-  # NAT Gateway silindiği için buraya herhangi bir rota eklenmiyor.
-  # Private Subnet'ler VPC dışına çıkamaz.
-  tags = merge(local.common_tags, { Name = "${local.cluster_name}-Private-RT" })
+  tags   = { Name = "${local.name_prefix}-Private-RT-VPCE-Only" }
 }
 
 resource "aws_route_table_association" "public" {
@@ -133,10 +155,83 @@ resource "aws_route_table_association" "private" {
   route_table_id = aws_route_table.private.id
 }
 
-# -----------------------------------------------------------------------------
-# IAM ROLES
-# -----------------------------------------------------------------------------
-# EC2 Admin Role (Jenkins, ArgoCD, Monitoring)
+# ----------------------------
+# VPC ENDPOINTS SG
+# ----------------------------
+resource "aws_security_group" "vpc_endpoints" {
+  name        = "VPC-Endpoints-SG"
+  description = "Security group for interface endpoints"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.main.cidr_block]
+    description = "HTTPS from VPC"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# S3 Gateway (route only private RT)
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = aws_vpc.main.id
+  service_name      = "com.amazonaws.${var.region}.s3"
+  vpc_endpoint_type = "Gateway"
+  route_table_ids   = [aws_route_table.private.id]
+
+  # (Optional) tighten later - kept simple for now
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = "*"
+      Action    = ["s3:GetObject", "s3:ListBucket"]
+      Resource  = "*"
+    }]
+  })
+
+  tags = { Name = "S3-Gateway-Endpoint" }
+}
+
+# Interface endpoint helper
+locals {
+  interface_endpoints = toset([
+    "ecr.api",
+    "ecr.dkr",
+    "eks",
+    "sts",
+    "logs",
+    "autoscaling",
+    "elasticloadbalancing",
+
+    # NAT yokken operasyon için KRİTİK (SSM)
+    "ssm",
+    "ssmmessages",
+    "ec2messages",
+  ])
+}
+
+resource "aws_vpc_endpoint" "ifaces" {
+  for_each            = local.interface_endpoints
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.${var.region}.${each.value}"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = aws_subnet.private[*].id
+  security_group_ids  = [aws_security_group.vpc_endpoints.id]
+  private_dns_enabled = true
+  tags                = { Name = "VPCE-${each.value}" }
+}
+
+# ----------------------------
+# IAM
+# ----------------------------
 resource "aws_iam_role" "admin_eks_role" {
   name = "Admin-EKS-Manager-Role"
   assume_role_policy = jsonencode({
@@ -149,23 +244,20 @@ resource "aws_iam_role" "admin_eks_role" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "admin_policies" {
-  for_each = toset([
-    "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
-    "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser"
-  ])
+resource "aws_iam_role_policy_attachment" "admin_adminaccess" {
   role       = aws_iam_role.admin_eks_role.name
-  policy_arn = each.value
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
 }
+
+
 
 resource "aws_iam_instance_profile" "admin" {
   name = "Admin-Instance-Profile"
   role = aws_iam_role.admin_eks_role.name
 }
 
-# EKS Control Plane Role
 resource "aws_iam_role" "eks_cluster" {
-  name = "${local.cluster_name}-Cluster-Role"
+  name = "${var.cluster_name}-Cluster-Role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -181,9 +273,8 @@ resource "aws_iam_role_policy_attachment" "eks_cluster_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
 }
 
-# EKS Worker Node Role
 resource "aws_iam_role" "eks_nodes" {
-  name = "${local.cluster_name}-Node-Role"
+  name = "${var.cluster_name}-Node-Role"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
@@ -198,28 +289,40 @@ resource "aws_iam_role_policy_attachment" "eks_node_policies" {
   for_each = toset([
     "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy",
     "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy",
-    "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+    "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly",
+    "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
+    "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore",
   ])
   role       = aws_iam_role.eks_nodes.name
   policy_arn = each.value
 }
 
-# -----------------------------------------------------------------------------
-# SECURITY GROUPS
-# -----------------------------------------------------------------------------
+# ----------------------------
+# SECURITY GROUPS (restricted)
+# ----------------------------
 resource "aws_security_group" "jenkins" {
   name        = "Jenkins-SG"
   description = "Jenkins, Docker, SonarQube"
   vpc_id      = aws_vpc.main.id
 
-  dynamic "ingress" {
-    for_each = [22, 8080, 9000]
-    content {
-      from_port   = ingress.value
-      to_port     = ingress.value
-      protocol    = "tcp"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
+  # SSH (ideally remove and use SSM)
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidrs
+  }
+  ingress {
+    from_port   = 8080
+    to_port     = 8080
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidrs
+  }
+  ingress {
+    from_port   = 9000
+    to_port     = 9000
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidrs
   }
 
   egress {
@@ -228,23 +331,30 @@ resource "aws_security_group" "jenkins" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
-  tags = merge(local.common_tags, { Name = "Jenkins-SG" })
 }
 
 resource "aws_security_group" "argo" {
   name        = "ArgoCD-SG"
-  description = "ArgoCD and Kubernetes Admin"
+  description = "ArgoCD admin host"
   vpc_id      = aws_vpc.main.id
 
-  dynamic "ingress" {
-    for_each = [22, 80, 443]
-    content {
-      from_port   = ingress.value
-      to_port     = ingress.value
-      protocol    = "tcp"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidrs
+  }
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidrs
+  }
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidrs
   }
 
   egress {
@@ -253,8 +363,6 @@ resource "aws_security_group" "argo" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
-  tags = merge(local.common_tags, { Name = "ArgoCD-SG" })
 }
 
 resource "aws_security_group" "monitoring" {
@@ -262,14 +370,23 @@ resource "aws_security_group" "monitoring" {
   description = "Prometheus and Grafana"
   vpc_id      = aws_vpc.main.id
 
-  dynamic "ingress" {
-    for_each = [22, 3000, 9090]
-    content {
-      from_port   = ingress.value
-      to_port     = ingress.value
-      protocol    = "tcp"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidrs
+  }
+  ingress {
+    from_port   = 3000
+    to_port     = 3000
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidrs
+  }
+  ingress {
+    from_port   = 9090
+    to_port     = 9090
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidrs
   }
 
   egress {
@@ -278,13 +395,32 @@ resource "aws_security_group" "monitoring" {
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-
-  tags = merge(local.common_tags, { Name = "Monitoring-SG" })
 }
 
-# -----------------------------------------------------------------------------
-# EC2 INSTANCES (ARM64)
-# -----------------------------------------------------------------------------
+resource "aws_security_group" "eks_cluster" {
+  name        = "${var.cluster_name}-SG"
+  description = "EKS cluster security group"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = [aws_vpc.main.cidr_block]
+    description = "Allow all inside VPC"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# ----------------------------
+# EC2 (ARM64 public)
+# ----------------------------
 resource "aws_instance" "jenkins" {
   ami                    = data.aws_ami.amazon_linux_2023_arm.id
   instance_type          = "t4g.large"
@@ -298,8 +434,7 @@ resource "aws_instance" "jenkins" {
     volume_size = 30
     volume_type = "gp3"
   }
-
-  tags = merge(local.common_tags, { Name = "Jenkins-Docker-Host" })
+  tags = { Name = "Jenkins-Docker-Host" }
 }
 
 resource "aws_instance" "argo" {
@@ -315,8 +450,7 @@ resource "aws_instance" "argo" {
     volume_size = 30
     volume_type = "gp3"
   }
-
-  tags = merge(local.common_tags, { Name = "ArgoCD-Admin-Host" })
+  tags = { Name = "ArgoCD-Admin-Host" }
 }
 
 resource "aws_instance" "monitoring" {
@@ -332,30 +466,41 @@ resource "aws_instance" "monitoring" {
     volume_size = 30
     volume_type = "gp3"
   }
-
-  tags = merge(local.common_tags, { Name = "Monitoring-Server" })
+  tags = { Name = "Monitoring-Server" }
 }
 
-# -----------------------------------------------------------------------------
-# EKS CLUSTER
-# -----------------------------------------------------------------------------
+# ----------------------------
+# EKS (dual endpoint; public restricted)
+# ----------------------------
 resource "aws_eks_cluster" "main" {
-  name     = local.cluster_name
+  name     = var.cluster_name
   role_arn = aws_iam_role.eks_cluster.arn
+  version  = "1.31"
 
   vpc_config {
-    subnet_ids              = concat(aws_subnet.public[*].id, aws_subnet.private[*].id)
+    subnet_ids = concat(aws_subnet.public[*].id, aws_subnet.private[*].id)
+
     endpoint_public_access  = true
-    endpoint_private_access = false
+    endpoint_private_access = true
+    public_access_cidrs     = var.allowed_cidrs
+
+    security_group_ids = [aws_security_group.eks_cluster.id]
   }
 
-  depends_on = [aws_iam_role_policy_attachment.eks_cluster_policy]
-  tags       = merge(local.common_tags, { Name = local.cluster_name })
+  enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_cluster_policy,
+    aws_vpc_endpoint.s3,
+    aws_vpc_endpoint.ifaces,
+  ]
+
+  tags = { Name = var.cluster_name }
 }
 
 resource "aws_eks_node_group" "main" {
   cluster_name    = aws_eks_cluster.main.name
-  node_group_name = "arm64-workers"
+  node_group_name = "arm64-private-workers"
   node_role_arn   = aws_iam_role.eks_nodes.arn
   subnet_ids      = aws_subnet.private[*].id
 
@@ -369,117 +514,80 @@ resource "aws_eks_node_group" "main" {
     max_size     = 4
     min_size     = 1
   }
-
   update_config {
     max_unavailable = 1
   }
 
-  tags = merge(local.common_tags, { Name = "EKS-ARM64-Workers" })
+  depends_on = [
+    aws_eks_cluster.main,
+    aws_iam_role_policy_attachment.eks_node_policies,
+    aws_vpc_endpoint.s3,
+    aws_vpc_endpoint.ifaces,
+  ]
+
+  tags = { Name = var.cluster_name }
 }
 
-# -----------------------------------------------------------------------------
-# ECR REPOSITORY
-# -----------------------------------------------------------------------------
+# -------------------------------------------------------------------
+# EKS ACCESS CONTROL (Cluster Admin for Admin EC2 Role)
+# -------------------------------------------------------------------
+
+resource "aws_eks_access_entry" "admin_role" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = aws_iam_role.admin_eks_role.arn
+  type          = "STANDARD"
+
+  depends_on = [aws_eks_cluster.main]
+}
+
+resource "aws_eks_access_policy_association" "admin_role_cluster_admin" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = aws_iam_role.admin_eks_role.arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.admin_role]
+}
+
+# ----------------------------
+# ECR
+# ----------------------------
 resource "aws_ecr_repository" "app" {
   name                 = "finops-app-repo"
   image_tag_mutability = "MUTABLE"
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  tags = local.common_tags
+  image_scanning_configuration { scan_on_push = true }
 }
 
-resource "aws_ecr_lifecycle_policy" "app" {
-  repository = aws_ecr_repository.app.name
-  policy = jsonencode({
-    rules = [{
-      rulePriority = 1
-      description  = "Keep last 10 images"
-      selection = {
-        tagStatus     = "tagged"
-        tagPrefixList = ["1.0"]
-        countType     = "imageCountMoreThan"
-        countNumber   = 10
-      }
-      action = { type = "expire" }
-    }]
-  })
-}
-
-# -----------------------------------------------------------------------------
+# ----------------------------
 # BUDGET
-# -----------------------------------------------------------------------------
+# ----------------------------
 resource "aws_budgets_budget" "monthly" {
-  name              = "devops-monthly-budget"
-  budget_type       = "COST"
-  limit_amount      = "50"
-  limit_unit        = "USD"
-  time_unit         = "MONTHLY"
+  name         = "devops-monthly-budget"
+  budget_type  = "COST"
+  limit_amount = "60"
+  limit_unit   = "USD"
+  time_unit    = "MONTHLY"
 
   notification {
-    comparison_operator      = "GREATER_THAN"
-    threshold                = 80
-    threshold_type           = "PERCENTAGE"
-    notification_type        = "FORECASTED"
-    subscriber_email_addresses = ["sadik.gok@gmail.com"]
+    comparison_operator        = "GREATER_THAN"
+    threshold                  = 80
+    threshold_type             = "PERCENTAGE"
+    notification_type          = "FORECASTED"
+    subscriber_email_addresses = [var.budget_email]
   }
 }
 
-# -----------------------------------------------------------------------------
-# OUTPUTS
-# -----------------------------------------------------------------------------
-output "jenkins_url" {
-  value = "http://${aws_instance.jenkins.public_ip}:8080"
-}
-
-output "sonarqube_url" {
-  value = "http://${aws_instance.jenkins.public_ip}:9000"
-}
-
-output "argocd_url" {
-  value = "http://${aws_instance.argo.public_ip}"
-}
-
-output "grafana_url" {
-  value = "http://${aws_instance.monitoring.public_ip}:3000"
-}
-
-output "prometheus_url" {
-  value = "http://${aws_instance.monitoring.public_ip}:9090"
-}
-
-output "ecr_repository" {
-  value = aws_ecr_repository.app.repository_url
-}
-
-output "eks_cluster_name" {
-  value = aws_eks_cluster.main.name
-}
-
-output "ssh_key" {
-  value = local_file.devops_key_file.filename
-}
-
-output "quick_start" {
-  value = <<-EOT
-    
-    🚀 DevOps Infrastructure Ready!
-    
-    Jenkins:    ${aws_instance.jenkins.public_ip}:8080
-    SonarQube:  ${aws_instance.jenkins.public_ip}:9000
-    ArgoCD:     ${aws_instance.argo.public_ip}
-    Grafana:    ${aws_instance.monitoring.public_ip}:3000
-    Prometheus: ${aws_instance.monitoring.public_ip}:9090
-    
-    SSH: ssh -i ${local_file.devops_key_file.filename} ec2-user@${aws_instance.jenkins.public_ip}
-    
-    Jenkins Password: sudo cat /var/lib/jenkins/secrets/initialAdminPassword
-    ECR: ${aws_ecr_repository.app.repository_url}
-    EKS: aws eks update-kubeconfig --name ${aws_eks_cluster.main.name} --region ap-south-1
-    
-    ⚠️ ÖNEMLİ: EKS işçi düğümleri (Private Subnets) internete çıkışa sahip DEĞİLDİR.
-    
-  EOT
-}
+# ----------------------------
+# OUTPUTS (short)
+# ----------------------------
+output "jenkins_url" { value = "http://${aws_instance.jenkins.public_ip}:8080" }
+output "sonarqube_url" { value = "http://${aws_instance.jenkins.public_ip}:9000" }
+output "argocd_url" { value = "http://${aws_instance.argo.public_ip}" }
+output "grafana_url" { value = "http://${aws_instance.monitoring.public_ip}:3000" }
+output "prometheus_url" { value = "http://${aws_instance.monitoring.public_ip}:9090" }
+output "ecr_repository" { value = aws_ecr_repository.app.repository_url }
+output "eks_cluster_name" { value = aws_eks_cluster.main.name }
+output "ssh_key_file" { value = local_file.devops_key_file.filename }

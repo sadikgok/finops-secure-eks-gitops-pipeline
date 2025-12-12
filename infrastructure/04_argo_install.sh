@@ -1,47 +1,76 @@
 #!/bin/bash
 # ----------------------------------
-# 04_argo_install.sh: ArgoCD/Kube-Admin Host Kurulumu (t4g.large)
+# 04_argo_install.sh: ArgoCD/Kube-Admin Host (t4g.large / AL2023 ARM64)
 # ----------------------------------
+set -euo pipefail
 
-# 0. Genel Güncelleme ve Temel Araçlar (DNF/Amazon Linux)
+exec > >(tee -a /var/log/04_argo_install.log | logger -t 04_argo_install -s 2>/dev/console) 2>&1
+trap 'echo "ERROR on line $LINENO. Exit code: $?"; exit 1' ERR
+
+echo "[0/5] System update & prerequisites..."
 sudo dnf update -y
-sudo dnf install -y git curl wget unzip
+sudo dnf install -y git curl wget unzip tar gzip ca-certificates
 
-# 1. AWS CLI v2 Kurulumu (Graviton/ARM64 Mimarisi)
-echo "AWS CLI v2 Kurulumu Başlatılıyor (ARM64)..."
-curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "awscliv2.zip"
-unzip awscliv2.zip
-sudo ./aws/install --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin
-rm awscliv2.zip
-rm -rf aws/
+# ----------------------------------
+# 1) AWS CLI v2 (ARM64)
+# ----------------------------------
+echo "[1/5] Installing AWS CLI v2..."
+if ! command -v aws >/dev/null 2>&1; then
+  curl -fLs "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o /tmp/awscliv2.zip
+  unzip -q /tmp/awscliv2.zip -d /tmp
+  sudo /tmp/aws/install --update --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin
+  rm -rf /tmp/aws /tmp/awscliv2.zip
+fi
+aws --version || true
 
-# 2. Kubernetes CLI Araçları (kubectl, eksctl, helm) - ARM64 Düzeltmesi
-# (EKS kümesini yönetmek ve ArgoCD'yi kurmak için gereklidir)
-echo "Kubernetes Araçları Kuruluyor (ARM64)..."
+# ----------------------------------
+# 2) kubectl (pin close to your EKS 1.31)
+# ----------------------------------
+echo "[2/5] Installing kubectl..."
+if ! command -v kubectl >/dev/null 2>&1; then
+  KUBECTL_VERSION="v1.31.0"
+  curl -fLs "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/arm64/kubectl" -o /tmp/kubectl
+  sudo install -o root -g root -m 0755 /tmp/kubectl /usr/local/bin/kubectl
+  rm -f /tmp/kubectl
+fi
+kubectl version --client --short || true
 
-# 2.1. kubectl
-K8S_VERSION=$(curl -s https://dl.k8s.io/release/stable.txt)
-curl -LO "https://dl.k8s.io/release/$K8S_VERSION/bin/linux/arm64/kubectl"
-sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-rm kubectl
+# ----------------------------------
+# 3) eksctl
+# ----------------------------------
+echo "[3/5] Installing eksctl..."
+if ! command -v eksctl >/dev/null 2>&1; then
+  curl -fLs "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_Linux_arm64.tar.gz" -o /tmp/eksctl.tar.gz
+  sudo tar -xzf /tmp/eksctl.tar.gz -C /usr/local/bin eksctl
+  rm -f /tmp/eksctl.tar.gz
+fi
+eksctl version || true
 
-# 2.2. eksctl
-curl --silent --location "https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_arm64.tar.gz" | tar xz -C /tmp
-sudo mv /tmp/eksctl /usr/local/bin
+# ----------------------------------
+# 4) helm (no pipe-to-bash)
+# ----------------------------------
+echo "[4/5] Installing helm..."
+if ! command -v helm >/dev/null 2>&1; then
+  HELM_VERSION="v3.16.3"
+  curl -fLs "https://get.helm.sh/helm-${HELM_VERSION}-linux-arm64.tar.gz" -o /tmp/helm.tgz
+  tar -xzf /tmp/helm.tgz -C /tmp
+  sudo install -m 0755 /tmp/linux-arm64/helm /usr/local/bin/helm
+  rm -rf /tmp/helm.tgz /tmp/linux-arm64
+fi
+helm version --short || true
 
-# 2.3. Helm
-curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+# ----------------------------------
+# 5) argocd CLI (pin or keep latest; here pin for stability)
+# ----------------------------------
+echo "[5/5] Installing argocd CLI..."
+if ! command -v argocd >/dev/null 2>&1; then
+  ARGOCD_VERSION="v2.12.6"
+  curl -fLs "https://github.com/argoproj/argo-cd/releases/download/${ARGOCD_VERSION}/argocd-linux-arm64" -o /tmp/argocd
+  sudo install -m 0755 /tmp/argocd /usr/local/bin/argocd
+  rm -f /tmp/argocd
+fi
+argocd version --client || true
 
-# 3. ArgoCD CLI Kurulumu
-echo "ArgoCD CLI Kuruluyor..."
-sudo curl -sSL -o /usr/local/bin/argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-arm64
-sudo chmod +x /usr/local/bin/argocd
-
-# 4. Kubeconfig Dosyasını Ayarlama (EKS'e Bağlanmak İçin)
-# Bu komut, IAM rolü sayesinde otomatik olarak kimlik doğrulaması yapar ve kubeconfig dosyasını oluşturur.
-# Ancak bu işlem EKS kümesi kurulduktan SONRA yapılmalıdır.
-# Bu nedenle, bu komut *manuel olarak* veya Jenkins tarafından yürütülmelidir.
-# echo "EKS bağlantısı için 'aws eks update-kubeconfig --name ${local.eks_cluster_name}' komutunu çalıştırın."
-
-# Kurulum tamamlandı.
-echo "ArgoCD Admin Host kurulumu tamamlandı."
+echo "✅ ArgoCD Admin Host tools installed."
+echo "Log: /var/log/04_argo_install.log"
+echo "Next (after EKS): aws eks update-kubeconfig --name <cluster> --region <region>"
