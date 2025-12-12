@@ -16,10 +16,10 @@ pipeline {
         IMAGE_TAG = "${RELEASE}.${BUILD_NUMBER}"
         
         // AWS/ECR
-        AWS_REGION = "ap-south-1"
+        /*AWS_REGION = "ap-south-1"
         AWS_ACCOUNT_ID = credentials('AWS_ACCOUNT_ID')
         ECR_REGISTRY = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
-        ECR_REPO_NAME = "finops-app-repo"
+        ECR_REPO_NAME = "finops-app-repo"*/
         
         // Credentials
         //JENKINS_API_TOKEN = credentials('JENKINS_API_TOKEN')
