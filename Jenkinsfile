@@ -202,7 +202,7 @@ pipeline {
                 }
             }
         }
-/*
+
         stage('Push to Docker Hub') {
             steps {
                 script {
@@ -222,7 +222,7 @@ pipeline {
                 }
             }
         }
-
+/*
         stage('Push to AWS ECR') {
             steps {
                 script {
