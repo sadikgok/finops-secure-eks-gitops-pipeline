@@ -137,18 +137,31 @@ pipeline {
                 }
             }
         }
-        
+
+        stage('Docker Build & Push to DockerHub') {
+            steps {
+                script {
+                    docker.withRegistry('', DOCKER_ID_LOGIN) {
+                        def docker_image = docker.build "${IMAGE_NAME}"
+                        docker_image.push("${IMAGE_TAG}")
+                        docker_image.push("latest")
+                    }
+                }
+            }
+        }
+
+        /*
         stage('Docker Build & Tag') {
             steps {
                 script {
                     echo '🔨 Docker image build ediliyor...'
                     // Native Jenkins'te docker komutları direkt çalışır
-                    /*sh """
+                    sh """
                         docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
                         docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
                         docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}
                         docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${ECR_REGISTRY}/${ECR_REPO_NAME}:latest
-                    """*/
+                    """
                     
                     // ECR_ACCOUNT_ID'yi güvenli bir şekilde çekiyoruz
                     withCredentials([
@@ -168,7 +181,7 @@ pipeline {
                     }
                 }
             }
-        }
+        }*/
 
         stage("Trivy Image Scan") {
             steps {
