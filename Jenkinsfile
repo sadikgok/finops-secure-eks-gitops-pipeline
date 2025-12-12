@@ -253,7 +253,7 @@ pipeline {
                 }
             }
         }
-
+*/
         stage('Update K8s Manifest') {
             steps {
                 script {
@@ -283,7 +283,7 @@ pipeline {
                 }
             }
         }
-
+/*
         stage('Cleanup Old Docker Tags') {
             steps {
                 script {
