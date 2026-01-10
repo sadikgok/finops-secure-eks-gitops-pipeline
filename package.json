@@ -1,5 +1,5 @@
 {
-  "name": "finops-app",
+  "name": "finops-secure-eks-gitops-pipeline",
   "version": "0.1.0",
   "private": true,
   "scripts": {
