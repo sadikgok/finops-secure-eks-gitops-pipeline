@@ -8,13 +8,13 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install app dependencies, including Material-UI 5
-RUN npm install
+RUN npm install --production
 
 # Copy the rest of the application code to the working directory
 COPY . .
 
 # Build the React app
-RUN npm run build
+RUN ls -la
 
 # Expose the port that the app will run on (adjust if needed)
 EXPOSE 3000
