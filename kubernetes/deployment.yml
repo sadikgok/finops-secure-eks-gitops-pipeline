@@ -19,7 +19,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: finops-secure-eks-gitops-pipeline
-          image: sadikgok/finops-secure-eks-gitops-pipeline:14
+          image: sadikgok/finops-secure-eks-gitops-pipeline:15
           imagePullPolicy: Always
           ports:
             - containerPort: 3000
