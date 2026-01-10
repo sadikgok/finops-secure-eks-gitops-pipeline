@@ -9,11 +9,20 @@ terraform {
 
 provider "aws" {
   region = "ap-south-1"
+  # access_key = "AAAAAAAAAAAAAA" # secret_key = "BBBBBBBBBBBBBB"
+}
+
+# Default VPC'yi kaynak olarak tanımla
+resource "aws_default_vpc" "Default" {
+  tags = {
+    Name = "Devops VPC"
+  }
 }
 
 resource "aws_security_group" "devops_sg" {
   name        = "My-Jenkins-Server-SG"
   description = "DevOps Lab inbound rules"
+  vpc_id      = aws_default_vpc.Default.id
 
   ingress = [
     for port in [22, 80, 443, 8080, 9000] : {
