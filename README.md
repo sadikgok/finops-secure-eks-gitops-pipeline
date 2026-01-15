@@ -188,6 +188,10 @@ Grafana dashboards provide visibility into:
 
 These choices are deliberate and documented, not accidental limitations.
 
+---
+
+# 🚀 Enterprise-Grade CI/CD Pipeline with GitOps & Full Observability
+
 > 📌 The following sections provide detailed implementation and setup instructions for each component described above. 
 A hands-on DevOps project demonstrating production-ready CI/CD practices, GitOps deployment, multi-layer security scanning, and comprehensive monitoring infrastructure on AWS.
 
