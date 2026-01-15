@@ -97,7 +97,7 @@ This separation minimizes blast radius, avoids resource contention, and mirrors 
 
 ## 🛠️ Infrastructure Breakdown
 
-### 4.1 CI/CD Infrastructure (Terraform – Automated)
+### CI/CD Infrastructure (Terraform – Automated)
 
 The CI/CD environment is provisioned using **Terraform** to ensure reproducibility and version-controlled infrastructure.
 
@@ -119,7 +119,7 @@ Jenkins handles **build and verification only**. It never directly deploys to Ku
 
 ---
 
-### 4.2 Monitoring Infrastructure (Manual – Learning Focused)
+### Monitoring Infrastructure (Manual – Learning Focused)
 
 Monitoring is deployed on a **separate EC2 instance** and installed manually to gain deep operational understanding.
 
